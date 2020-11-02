@@ -53,27 +53,31 @@ namespace GBNsender {
             if (ack_id < id) // frame not properly received
                 tokenSources.Dequeue ().Item3.Cancel ();
         }
+        async Task WaitFirstTask (Stream stream) {
+            try {
+                await window[0].Item3;
+                window.RemoveAt (0);
+            } catch (BrokenFrameException e) {
+                while (window[0].Item1 < e.broken_frame)
+                    window.RemoveAt (0);
+                int current_count = window.Count;
+                for (int i = 0; i < current_count; i++)
+                    window.Add ((window[i].Item1, window[i].Item2, SendFrame (
+                        stream, window[i].Item1, window[i].Item2
+                    )));
+                window.RemoveRange (0, current_count);
+            }
+        }
         public async Task Send (string data) {
             var builder = new FrameBuilder (src, dst);
             using (var stream = client.GetStream ()) {
                 foreach (var frm in builder.GetFrames (Encoding.UTF8.GetBytes (data))) {
-                    if (current_id > window[0].Item1 + window_size) {
-                        try {
-                            await window[0].Item3;
-                            window.RemoveAt (0);
-                        } catch (BrokenFrameException e) {
-                            while (window[0].Item1 < e.broken_frame)
-                                window.RemoveAt (0);
-                            int current_count = window.Count;
-                            foreach (var task in window)
-                                window.Add ((task.Item1, task.Item2, SendFrame (
-                                    stream, task.Item1, task.Item2
-                                )));
-                            window.RemoveRange (0, current_count);
-                        }
+                    if (window.Count > 0 && current_id > window[0].Item1 + window_size) {
+                        await WaitFirstTask (stream);
                     }
                     window.Add ((current_id, frm, SendFrame (stream, current_id++, frm)));
                 }
+                while (window.Count > 0) await WaitFirstTask (stream);
             }
         }
     }

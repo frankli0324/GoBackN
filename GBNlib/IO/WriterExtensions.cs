@@ -8,7 +8,7 @@ namespace GBN.IO {
         public async static Task WriteAddressAsync (this Stream writer, Address address) {
             var data = address.address;
             Array.Reverse (data);
-            await writer.WriteAsync (data, 0, 8);
+            await writer.WriteAsync (data, 0, 6);
         }
         public async static Task WriteFrameAsync (this Stream writer, Frame frame) {
             await writer.WriteAddressAsync (frame.dst_addr);

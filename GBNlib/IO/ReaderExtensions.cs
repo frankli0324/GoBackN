@@ -7,7 +7,7 @@ namespace GBN.IO {
     public static class ReaderExtensions {
         public async static Task<Address> ReadAddressAsync (this Stream reader) {
             var ret = new Address ();
-            await reader.ReadAsync (ret.address, 0, 8);
+            await reader.ReadAsync (ret.address, 0, 6);
             Array.Reverse (ret.address);
             // MACs are reversely transported
             return ret;
@@ -15,7 +15,7 @@ namespace GBN.IO {
         public async static Task<Frame> ReadFrameAsync (this Stream reader, Address self_addr = null) {
             byte[] buffer = new byte[1500];
             Address dst_addr = await reader.ReadAddressAsync ();
-            if (self_addr != null && dst_addr != self_addr)
+            if (self_addr != null && dst_addr.ToString () != self_addr.ToString ())
                 throw new InvalidDataException ("frame not bound for this machine");
             Frame f = new Frame ();
             f.dst_addr = dst_addr;
@@ -27,6 +27,8 @@ namespace GBN.IO {
             if (BitConverter.ToUInt32 (buffer, len) != hash.ComputeHash (buffer, len)) {
                 throw new InvalidDataException ("CRC mismatch");
             }
+            f.data = new byte[len];
+            Array.Copy (buffer, f.data, len);
             return f;
         }
     }
