@@ -9,17 +9,17 @@ using GBN.IO;
 using GBN.Types;
 
 namespace GBNsender {
-    class RollbackException : Exception {
-        int broken_frame;
-        public RollbackException (int b) { broken_frame = b; }
+    class BrokenFrameException : Exception {
+        public int broken_frame { get; private set; }
+        public BrokenFrameException (int b) { broken_frame = b; }
     }
     class Control {
-        int window_now, window_begin, window_size;
+        int current_id, window_size;
+        List<(int, Frame, Task)> window = new List<(int, Frame, Task)> ();
         string src, dst;
         TcpClient client;
-        Queue<(int, CancellationTokenSource)> tokenSources
-            = new Queue<(int, CancellationTokenSource)> ();
-        CancellationTokenSource windowFullTokenSource;
+        Queue<(int, CancellationTokenSource, CancellationTokenSource)> tokenSources
+            = new Queue<(int, CancellationTokenSource, CancellationTokenSource)> ();
 
         public Control (string src, string dst, string ip = "127.0.0.1", int port = 1234, int window_size = 4) {
             this.src = src;
@@ -31,41 +31,48 @@ namespace GBNsender {
             byte[] ack_buf = new byte[4];
             await stream.WriteAsync (BitConverter.GetBytes (id), 0, 4);
             await stream.WriteFrameAsync (frm);
-            var tokenSource = new CancellationTokenSource ();
-            tokenSources.Enqueue ((id, tokenSource));
-            var token = tokenSource.Token;
+            var brokenTokenSource = new CancellationTokenSource ();
+            var ackedTokenSource = CancellationTokenSource.CreateLinkedTokenSource(
+                brokenTokenSource.Token
+            );
+            tokenSources.Enqueue ((id, ackedTokenSource, brokenTokenSource));
+            var token = ackedTokenSource.Token;
             // presume T_transport = 1000
             if (!stream.ReadAsync (ack_buf, 0, 4).Wait (2000, token)) {
                 if (!token.IsCancellationRequested)
-                    await SendFrame (stream, id, frm);
+                    throw new BrokenFrameException (id);
                 // successfully delivered if cancellation requested
                 return;
             }
             int ack_id = BitConverter.ToInt32 (ack_buf);
 
-            if (ack_id < id)  // frame not properly received
-                throw new RollbackException (ack_id + 1);
-
             // no need to wait for prior acks
-            while (tokenSources.Peek ().Item1 < id)
+            while (tokenSources.Peek ().Item1 < ack_id)
                 tokenSources.Dequeue ().Item2.Cancel ();
 
-            // what if larger ack arrived first
-            if (window_begin < id + 1)
-                window_begin = id + 1;
-            if (windowFullTokenSource != null &&
-                !windowFullTokenSource.IsCancellationRequested)
-                windowFullTokenSource.Cancel ();
+            if (ack_id < id) // frame not properly received
+                tokenSources.Dequeue ().Item3.Cancel ();
         }
         public async Task Send (string data) {
             var builder = new FrameBuilder (src, dst);
             using (var stream = client.GetStream ()) {
                 foreach (var frm in builder.GetFrames (Encoding.UTF8.GetBytes (data))) {
-                    if (window_now > window_begin + window_size) {
-                        windowFullTokenSource = new CancellationTokenSource ();
-                        await Task.Delay (-1, windowFullTokenSource.Token);
+                    if (current_id > window[0].Item1 + window_size) {
+                        try {
+                            await window[0].Item3;
+                            window.RemoveAt (0);
+                        } catch (BrokenFrameException e) {
+                            while (window[0].Item1 < e.broken_frame)
+                                window.RemoveAt (0);
+                            int current_count = window.Count;
+                            foreach (var task in window)
+                                window.Add ((task.Item1, task.Item2, SendFrame (
+                                    stream, task.Item1, task.Item2
+                                )));
+                            window.RemoveRange (0, current_count);
+                        }
                     }
-                    var send_task = SendFrame (stream, window_now++, frm);
+                    window.Add ((current_id, frm, SendFrame (stream, current_id++, frm)));
                 }
             }
         }
