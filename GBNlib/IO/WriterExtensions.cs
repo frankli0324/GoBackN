@@ -6,7 +6,8 @@ using GBN.Types;
 namespace GBN.IO {
     public static class WriterExtensions {
         public async static Task WriteAddressAsync (this Stream writer, Address address) {
-            var data = address.address;
+            var data = new byte[address.address.Length];
+            Array.Copy (address.address, data, address.address.Length);
             Array.Reverse (data);
             await writer.WriteAsync (data, 0, 6);
         }

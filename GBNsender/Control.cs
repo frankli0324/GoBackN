@@ -32,7 +32,7 @@ namespace GBNsender {
             await stream.WriteAsync (BitConverter.GetBytes (id), 0, 4);
             await stream.WriteFrameAsync (frm);
             var brokenTokenSource = new CancellationTokenSource ();
-            var ackedTokenSource = CancellationTokenSource.CreateLinkedTokenSource(
+            var ackedTokenSource = CancellationTokenSource.CreateLinkedTokenSource (
                 brokenTokenSource.Token
             );
             tokenSources.Enqueue ((id, ackedTokenSource, brokenTokenSource));
@@ -46,11 +46,14 @@ namespace GBNsender {
             }
             int ack_id = BitConverter.ToInt32 (ack_buf);
 
+            if (window.Count > 0 && (ack_id < window[0].Item1 || ack_id > window[0].Item1 + window_size))
+                return;  // broken ack, ignored
+
             // no need to wait for prior acks
-            while (tokenSources.Peek ().Item1 < ack_id)
+            while (tokenSources.Count > 0 && tokenSources.Peek ().Item1 < ack_id)
                 tokenSources.Dequeue ().Item2.Cancel ();
 
-            if (ack_id < id) // frame not properly received
+            if (tokenSources.Count > 0 && ack_id < id) // frame not properly received
                 tokenSources.Dequeue ().Item3.Cancel ();
         }
         async Task WaitFirstTask (Stream stream) {

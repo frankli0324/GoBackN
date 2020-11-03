@@ -13,7 +13,7 @@ namespace GBN.IO {
             return ret;
         }
         public async static Task<Frame> ReadFrameAsync (this Stream reader, Address self_addr = null) {
-            byte[] buffer = new byte[1500];
+            byte[] buffer = new byte[1504];
             Address dst_addr = await reader.ReadAddressAsync ();
             if (self_addr != null && dst_addr.ToString () != self_addr.ToString ())
                 throw new InvalidDataException ("frame not bound for this machine");
@@ -22,8 +22,9 @@ namespace GBN.IO {
             f.src_addr = await reader.ReadAddressAsync ();
             await reader.ReadAsync (buffer, 0, 2);
             short len = BitConverter.ToInt16 (buffer, 0);
-            await reader.ReadAsync (buffer, 0, len + 4);
+            await reader.ReadAsync (buffer, 0, len);
             var hash = new Utils.CRC32 ();
+            await reader.ReadAsync (buffer, len, 4);
             if (BitConverter.ToUInt32 (buffer, len) != hash.ComputeHash (buffer, len)) {
                 throw new InvalidDataException ("CRC mismatch");
             }
