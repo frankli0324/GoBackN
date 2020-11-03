@@ -39,9 +39,9 @@ namespace GBNsender {
             var token = ackedTokenSource.Token;
             // presume T_transport = 1000
             if (!stream.ReadAsync (ack_buf, 0, 4).Wait (2000, token)) {
-                if (!token.IsCancellationRequested)
+                if (!token.IsCancellationRequested || brokenTokenSource.IsCancellationRequested)
                     throw new BrokenFrameException (id);
-                // successfully delivered if cancellation requested
+                // successfully delivered if acked cancellation requested
                 return;
             }
             int ack_id = BitConverter.ToInt32 (ack_buf);
